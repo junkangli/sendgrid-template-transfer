@@ -1,0 +1,7 @@
+{
+  "profiles": {
+    "sendgrid-template-transfer": {
+      "commandName": "Project"
+    }
+  }
+}
