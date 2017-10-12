@@ -17,9 +17,15 @@ namespace SendgridTemplateTransfer
         {
             Configure();
 
-            CleanUp().Wait();
-            Execute().Wait();
-
+            var templates = GetTemplates().Result;
+            Console.WriteLine("\n\nExecuting this process will wipe out of all templates before the transfer takes place.");
+            Console.WriteLine("Are you sure you want to continue? (Y/n)");
+            var response = Console.ReadLine();
+            if (response == "Y")
+            {
+                CleanUp(templates).Wait();
+                Execute().Wait();
+            }
             Console.WriteLine("\n\nPress <Enter> to QUIT.");
             Console.ReadLine();
         }
@@ -31,9 +37,11 @@ namespace SendgridTemplateTransfer
                 .AddJsonFile("settings.json", optional: true)
                 .AddUserSecrets("aspnet-sendgrid-template-transfer-20170330040601");
             var configuration = builder.Build();
-            Settings = new SendGridSettings();
-            Settings.SourceAccountApiKey = configuration.GetValue<string>("SendGrid:SourceAccountApiKey");
-            Settings.TargetAccountApiKey = configuration.GetValue<string>("SendGrid:TargetAccountApiKey");
+            Settings = new SendGridSettings
+            {
+                SourceAccountApiKey = configuration.GetValue<string>("SendGrid:SourceAccountApiKey"),
+                TargetAccountApiKey = configuration.GetValue<string>("SendGrid:TargetAccountApiKey")
+            };
         }
 
         private static async Task Execute()
@@ -83,14 +91,25 @@ namespace SendgridTemplateTransfer
             }
         }
 
-        private static async Task CleanUp()
+        private static async Task<TemplatesModel> GetTemplates()
+        {
+            var apiKey = Settings.TargetAccountApiKey;
+            var targetAccountClient = new SendGridClient(apiKey);
+            Console.WriteLine("Listing target templates");
+            var result = await GetRequest<TemplatesModel>(targetAccountClient, "templates");
+            foreach (var item in result.Templates)
+            {
+                Console.WriteLine($"Found {item.Name}: {item.Id}");
+            }
+            return result;
+        }
+
+        private static async Task CleanUp(TemplatesModel model)
         {
             var apiKey = Settings.TargetAccountApiKey;
             var targetAccountClient = new SendGridClient(apiKey);
             Console.WriteLine("Cleaning Up");
-            var result = await GetRequest<TemplatesModel>(targetAccountClient, "templates");
-            var templates = new List<Template>();
-            foreach (var item in result.Templates)
+            foreach (var item in model.Templates)
             {
                 Console.WriteLine($"\nRemoving {item.Name}: {item.Id}");
                 foreach (var version in item.Versions)

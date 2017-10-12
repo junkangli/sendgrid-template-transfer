@@ -1,16 +1,16 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 14
-VisualStudioVersion = 14.0.25420.1
+# Visual Studio 15
+VisualStudioVersion = 15.0.26730.12
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{8FD49D0D-5209-47E3-B789-813185BF3C0D}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{AE7CF848-6FE1-49A8-A076-8370DA5A70F6}"
 	ProjectSection(SolutionItems) = preProject
-		global.json = global.json
+		readme.md = readme.md
 	EndProjectSection
 EndProject
-Project("{8BB2217D-0F2D-49D1-97BC-3654ED321F3B}") = "sendgrid-template-transfer", "src\sendgrid-template-transfer\sendgrid-template-transfer.xproj", "{9D408A74-9171-4ADA-8CE9-E9F6727919AC}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "sendgrid-template-transfer", "src\sendgrid-template-transfer\sendgrid-template-transfer.csproj", "{9D408A74-9171-4ADA-8CE9-E9F6727919AC}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -28,5 +28,8 @@ Global
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{9D408A74-9171-4ADA-8CE9-E9F6727919AC} = {8FD49D0D-5209-47E3-B789-813185BF3C0D}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {60AA11CE-7DAD-4771-B1F7-3EA555DCDE80}
 	EndGlobalSection
 EndGlobal
