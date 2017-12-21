@@ -13,21 +13,48 @@ namespace SendgridTemplateTransfer
     {
         private static SendGridSettings Settings;
 
-        public static void Main(string[] args)
+        public static async Task Main(string[] args)
         {
             Configure();
 
-            var templates = GetTemplates().Result;
-            Console.WriteLine("\n\nExecuting this process will wipe out of all templates before the transfer takes place.");
-            Console.WriteLine("Are you sure you want to continue? (Y/n)");
-            var response = Console.ReadLine();
-            if (response == "Y")
+            string templatePrefix = null;
+
+            if (args.Length == 1)
             {
-                CleanUp(templates).Wait();
-                Execute().Wait();
+                templatePrefix = args[0];
+                Console.WriteLine($"Template prefix set to [{templatePrefix}]");
             }
+            else
+            {
+                Console.Write("Do you want to filter the templates based on prefix (Y/n)? ");
+                var response = Console.ReadLine();
+                if (response == "Y")
+                {
+                    Console.Write("Template prefix set to: ");
+                    templatePrefix = Console.ReadLine();
+                }
+            }
+
+            var templates = await GetMatchingTemplates(templatePrefix);
+            await Execute(templates);
+
             Console.WriteLine("\n\nPress <Enter> to QUIT.");
             Console.ReadLine();
+        }
+
+        private static async Task<TemplatesModel> GetMatchingTemplates(string prefix = null)
+        {
+            var apiKey = Settings.SourceAccountApiKey;
+            var sourceAccountClient = new SendGridClient(apiKey);
+
+            Console.WriteLine("Getting templates from Source Account");
+            var result = await GetRequest<TemplatesModel>(sourceAccountClient, "templates");
+            var filteredResult = (prefix != null) ? result.Templates.Where(t => t.Name.StartsWith(prefix)) : result.Templates;
+            foreach (var item in filteredResult)
+            {
+                Console.WriteLine($"Found {item.Name}: {item.Id}");
+            }
+            return new TemplatesModel { Templates = filteredResult.ToList() };
         }
 
         private static void Configure()
@@ -35,7 +62,7 @@ namespace SendgridTemplateTransfer
             var builder = new ConfigurationBuilder()
                 .AddEnvironmentVariables()
                 .AddJsonFile("settings.json", optional: true)
-                .AddUserSecrets("aspnet-sendgrid-template-transfer-20170330040601");
+                .AddUserSecrets<Program>();
             var configuration = builder.Build();
             Settings = new SendGridSettings
             {
@@ -44,64 +71,59 @@ namespace SendgridTemplateTransfer
             };
         }
 
-        private static async Task Execute()
+        private static async Task Execute(TemplatesModel model)
         {
             var apiKey = Settings.SourceAccountApiKey;
             var sourceAccountClient = new SendGridClient(apiKey);
 
-            // Step 1. Retrieve all available templates from Account1
-            Console.WriteLine("Retrieving all templates");
-            var result = await GetRequest<TemplatesModel>(sourceAccountClient, "templates");
-            var templates = new List<Template>();
-            // Step 2. Recursively retrieve each template from Account1
-            foreach (var item in result.Templates)
+            var runId = $"{DateTime.Now:yyyyMMddHHmm}";
+            var savedDirectory = $"{Directory.GetCurrentDirectory()}\\Templates\\{runId}";
+            Directory.CreateDirectory(savedDirectory);
+            
+            // Step 2. Recursively retrieve each template
+            foreach (var item in model.Templates)
             {
                 Console.WriteLine($"\nRetrieving {item.Name}: {item.Id}");
                 var template = await GetRequest<Template>(sourceAccountClient, $"templates/{item.Id}");
 
                 // Step 3.Backup templates to an external file
-                var version = template.Versions.First();
-                File.WriteAllText($"Templates\\{item.Name}.json", JsonConvert.SerializeObject(version, Formatting.Indented));
+                var activeTemplate = template.Versions.First(v => v.Active == 1);
+                File.WriteAllText($"{savedDirectory}\\{item.Name}.json", JsonConvert.SerializeObject(activeTemplate, Formatting.Indented));
             }
-            Highlight($"\nTemplates saved in {Directory.GetCurrentDirectory()}\\Templates directory");
+            Highlight($"\nTemplates saved in {savedDirectory} directory");
 
             var output = new List<string>();
 
             apiKey = Settings.TargetAccountApiKey;
             var targetAccountClient = new SendGridClient(apiKey);
-            // Step 4. Create an empty template in Account2
-            foreach (var fileFullPath in Directory.GetFiles($"{Directory.GetCurrentDirectory()}\\Templates"))
+            // Step 4. Create an empty template if don't exist in Target Account
+            var templatesInTarget = await GetRequest<TemplatesModel>(targetAccountClient, "templates");
+            foreach (var fileFullPath in Directory.GetFiles($"{savedDirectory}"))
             {
                 var fileName = Path.GetFileNameWithoutExtension(fileFullPath);
-                Console.WriteLine($"\nCreating template {fileName}");
-                var template = await PostRequest<Template>(targetAccountClient, "templates", new Template { Name = $"{DateTime.Now:yyyyMMddhhmm}-{fileName}" });
+                var template = templatesInTarget.Templates.SingleOrDefault(t => t.Name == fileName);
+
+                if (template == null)
+                {
+                    Console.WriteLine($"\nCreating template {fileName}");
+                    template = await PostRequest<Template>(targetAccountClient, "templates", new Template { Name = fileName });
+                }
 
                 // Step 5. Populate template
-                Console.WriteLine($"Populating template");
-                var json = File.ReadAllText(fileFullPath);
+                Console.WriteLine($"Populating template {fileName}");
+                var json = JsonConvert.DeserializeObject<Version>(File.ReadAllText(fileFullPath));
+                var templateReference = json.Name;
+                json.Name = $"{templateReference}-{runId}";
                 var version = await PostRequest<Version>(targetAccountClient, $"templates/{template.Id}/versions", json);
                 Console.WriteLine($" Version {version.Name}: {version.Id}");
 
-                output.Add($"\"{template.Name}\": \"{template.Id}\"");
+                output.Add($"\"{templateReference}\": \"{template.Id}\"");
             }
             Highlight("\nOutput:");
             foreach (var item in output)
             {
                 Console.WriteLine(item);
             }
-        }
-
-        private static async Task<TemplatesModel> GetTemplates()
-        {
-            var apiKey = Settings.TargetAccountApiKey;
-            var targetAccountClient = new SendGridClient(apiKey);
-            Console.WriteLine("Listing target templates");
-            var result = await GetRequest<TemplatesModel>(targetAccountClient, "templates");
-            foreach (var item in result.Templates)
-            {
-                Console.WriteLine($"Found {item.Name}: {item.Id}");
-            }
-            return result;
         }
 
         private static async Task CleanUp(TemplatesModel model)
@@ -148,7 +170,9 @@ namespace SendgridTemplateTransfer
         private static void EnsureSuccessStatusCode(Response response)
         {
             var statusCode = response.StatusCode;
-            if (!((int)statusCode >= 200) && ((int)statusCode <= 299))
+            var integerStatusCode = (int)statusCode;
+            var isSuccessStatusCode = ((integerStatusCode >= 200) && (integerStatusCode <= 299));
+            if (!isSuccessStatusCode)
             {
                 var content = response.Body.ReadAsStringAsync().Result;
                 throw new Exception(content);
